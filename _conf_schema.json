@@ -1,0 +1,91 @@
+{
+  "api_key": {
+    "description": "MiniMax API Key(留空则自动读取 mmx_cli_tool 插件的 api_key)",
+    "type": "string",
+    "default": "",
+    "hint": "以 sk- 开头。留空时启动/首次调用会自动继承 astrbot_plugin_mmx_cli_tool 配置的第一个 key。"
+  },
+  "region": {
+    "description": "API 区域",
+    "type": "string",
+    "options": ["cn", "global"],
+    "default": "cn"
+  },
+  "base_url": {
+    "description": "自定义 API 地址(留空使用区域默认)",
+    "type": "string",
+    "default": ""
+  },
+  "timeout": {
+    "description": "API 请求超时(秒)",
+    "type": "int",
+    "default": 120
+  },
+  "default_voice_id": {
+    "description": "默认音色 voice_id(留空时若本地命名表有 FurinaVoice01 则自动用 FurinaVoice01)",
+    "type": "string",
+    "default": "FurinaVoice01"
+  },
+  "default_model": {
+    "description": "默认 TTS 模型",
+    "type": "string",
+    "default": "speech-2.8-hd"
+  },
+  "voice_probability": {
+    "description": "自动语音概率(0~1,0=关闭自动语音)",
+    "type": "float",
+    "default": 0
+  },
+  "enabled_sessions": {
+    "description": "生效会话白名单(群号/私聊QQ)。空=全部会话生效",
+    "type": "list",
+    "default": [],
+    "hint": "例如: [\"123456789\"] 表示仅该会话生效;留空则所有群和私聊都生效。"
+  },
+  "whitelist_mode": {
+    "description": "白名单/黑名单语义",
+    "type": "string",
+    "options": ["whitelist", "blacklist"],
+    "default": "whitelist"
+  },
+  "max_chars": {
+    "description": "单次/单段语音字符上限(超长自动场景会分段;手动朗读超长则拒绝)",
+    "type": "int",
+    "default": 1000
+  },
+  "split_chars": {
+    "description": "分段标点(用于 LLM 自动语音分段)",
+    "type": "list",
+    "default": ["。", "！", "？", "!", "?", "\n"]
+  },
+  "min_segment_len": {
+    "description": "分段最小长度",
+    "type": "int",
+    "default": 10
+  },
+  "max_segment_len": {
+    "description": "单段最大长度(超过按此硬切)",
+    "type": "int",
+    "default": 200
+  },
+  "audio_format": {
+    "description": "语音格式(mp3/wav 等,发送给 QQ 用 mp3 兼容最好)",
+    "type": "string",
+    "default": "mp3"
+  },
+  "fallback_to_text": {
+    "description": "语音合成失败时回退发送文字",
+    "type": "bool",
+    "default": true
+  },
+  "use_voice_for_short": {
+    "description": "自动语音也覆盖短回复(否则短于 min_voice_len 的文字仍发文字)",
+    "type": "bool",
+    "default": true
+  },
+  "min_voice_len": {
+    "description": "自动语音最短文本长度(use_voice_for_short=false 时生效)",
+    "type": "int",
+    "default": 15
+  }
+}
