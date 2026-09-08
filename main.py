@@ -1,7 +1,7 @@
 """MiniMax 语音播报 — AstrBot 插件入口。
 
 功能:
-- LLM 回复自动概率语音(模型A):命中段纯语音、未命中段发文字,默认关闭(概率0,WebUI可调)。
+- LLM 回复自动概率语音:dual 模式(默认)=文字照发+语音按概率叠加;voice_only=命中段纯语音。
 - /speak:回复引用某条消息即朗读该消息文本(纯语音)。
 - /voice clone|list|use|delete|preview:音色复刻、命名、切换、删除、试听。
 - 会话白名单 / 黑名单;TTS 失败回退文字。
@@ -53,7 +53,13 @@ class Main(star.Star):
         timeout = float(config.get("timeout", 120) or 120)
         self._default_model = str(config.get("default_model", "speech-2.8-hd") or "speech-2.8-hd")
         self._default_voice_id = str(config.get("default_voice_id", "FurinaVoice01") or "").strip()
-        self._probability = float(config.get("voice_probability", 0.0) or 0.0)
+        self._probability = float(config.get("voice_probability", 0.3) or 0.0)
+        self._auto_mode = str(config.get("auto_speak_mode", "dual") or "dual").strip().lower()
+        if self._auto_mode not in {"dual", "voice_only", "off"}:
+            self._auto_mode = "dual"
+        self._dual_delay = max(0.0, float(config.get("dual_delay_seconds", 2.0) or 2.0))
+        if self._auto_mode == "off":
+            self._probability = 0.0
         self._audio_format = str(config.get("audio_format", "mp3") or "mp3")
         self._fallback = bool(config.get("fallback_to_text", True))
         self._use_voice_short = bool(config.get("use_voice_for_short", True))
@@ -94,7 +100,8 @@ class Main(star.Star):
 
         _log_info(
             f"加载完成: voice={self._voices.get_current_voice_id(self._default_voice_id)} "
-            f"prob={self._probability} model={self._default_model} key={'OK' if api_key else 'EMPTY'}"
+            f"mode={self._auto_mode} prob={self._probability} model={self._default_model} "
+            f"key={'OK' if api_key else 'EMPTY'}"
         )
         self._warn_enhancer_conflict()
 
@@ -121,8 +128,8 @@ class Main(star.Star):
         return ""
 
     def _warn_enhancer_conflict(self) -> None:
-        """自动语音为模型A(接管发送),与 chat_enhancer 分段发送互斥,给出提示。"""
-        if self._probability <= 0:
+        """voice_only 模式会接管发送,与 chat_enhancer 分段发送互斥,给出提示。"""
+        if self._auto_mode != "voice_only":
             return
         try:
             cfg_path = (
@@ -135,8 +142,9 @@ class Main(star.Star):
                 split = data.get("enable_split", True)
                 if split:
                     _log_warn(
-                        "检测到 chat_enhancer 分段开启,自动语音(模型A)会接管发送,"
-                        "建议在 chat_enhancer 面板关闭「消息分段/合并转发」或关闭本插件自动语音,以免冲突。"
+                        "voice_only 模式会接管发送,检测到 chat_enhancer 分段开启,"
+                        "二者会冲突。建议改用 auto_speak_mode=dual(文字照发+语音叠加),"
+                        "或关闭 chat_enhancer 的分段/转发。"
                     )
         except Exception:  # noqa: BLE001
             pass
@@ -192,6 +200,40 @@ class Main(star.Star):
                 if seg.strip():
                     final.append(seg.strip())
         return [seg for seg in final if seg.strip()] or ([text.strip()] if text.strip() else [])
+
+    def _chunk_text(self, text: str) -> list[str]:
+        """按 max_chars 上限切块(尽量在句号/换行处),用于 dual 单次语音叠加。"""
+        cap = max(1, self._max_chars)
+        text = (text or "").strip()
+        if not text:
+            return []
+        if len(text) <= cap:
+            return [text]
+        breaks = set("。！？!?\n")
+        chunks: list[str] = []
+        current = ""
+        for ch in text:
+            current += ch
+            if len(current) >= cap:
+                chunks.append(current.strip())
+                current = ""
+            elif ch in breaks and len(current.strip()) >= self._min_seg:
+                chunks.append(current.strip())
+                current = ""
+        if current.strip():
+            chunks.append(current.strip())
+        # 超长残块硬切兜底
+        final: list[str] = []
+        for c in chunks:
+            if len(c) <= cap:
+                final.append(c)
+            else:
+                while len(c) > cap:
+                    final.append(c[:cap].strip())
+                    c = c[cap:]
+                if c.strip():
+                    final.append(c.strip())
+        return [c for c in final if c.strip()]
 
     # ------------------------------------------------------------ 语音发送
 

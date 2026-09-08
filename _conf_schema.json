@@ -32,9 +32,20 @@
     "default": "speech-2.8-hd"
   },
   "voice_probability": {
-    "description": "自动语音概率(0~1,0=关闭自动语音)",
+    "description": "自动语音概率(0~1,0=不自动加语音)",
     "type": "float",
-    "default": 0
+    "default": 0.3
+  },
+  "auto_speak_mode": {
+    "description": "自动语音模式。dual:文字照常发+按概率延迟约2秒叠一条语音(与 chat_enhancer 不冲突,推荐);voice_only:接管发送,命中段纯语音(需在 chat_enhancer 关闭分段/转发);off:关闭自动语音",
+    "type": "string",
+    "options": ["dual", "voice_only", "off"],
+    "default": "dual"
+  },
+  "dual_delay_seconds": {
+    "description": "dual 模式语音在文字后的延迟秒数",
+    "type": "float",
+    "default": 2.0
   },
   "enabled_sessions": {
     "description": "生效会话白名单(群号/私聊QQ)。空=全部会话生效",
