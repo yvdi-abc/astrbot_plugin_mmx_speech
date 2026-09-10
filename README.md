@@ -53,6 +53,59 @@
 默认 `auto_speak_mode=dual`:本插件**不接管文字发送**,chat_enhancer 照常分段/合并转发文字,语音按概率延迟约 2 秒独立追加,二者可共存。
 仅当切到 `voice_only`(命中段纯语音)才需要关闭 chat_enhancer 的分段/转发。手动 `/speak` 与 `/voice` 指令始终不受影响。
 
+## 部署与周边治理(重要)
+
+本插件依赖 AstrBot 的 Agent 工具链与若干周边插件。若语音/搜索/画图行为异常,通常是**周边配置**而非本插件问题。以下是已验证的推荐配置:
+
+### 1. 工具可见性(AstrBot 全局配置)
+
+在 `data/cmd_config.json` 的 `provider_settings` 中:
+
+| 配置项 | 推荐值 | 作用 |
+|---|---|---|
+| `show_tool_use_status` | `false` | **不把工具调用过程发给用户**(否则用户会看到"权限不足"等内部报错) |
+| `show_tool_call_result` | `false` | 不把工具原始返回发给用户 |
+| `computer_use_runtime` | `none` | 禁用本地 shell/Python/文件工具,避免普通用户触发高权限能力(副作用:管理员也无法使用本地 Agent 工具) |
+| `computer_use_require_admin` | `true` | 若必须开 `local` runtime,至少限制为管理员 |
+
+### 2. 危险工具不暴露给非管理员
+
+`astrbot_plugin_mmx_cli_tool` 中的 **音色复刻 LLM 工具(`VoiceClone*`)已不再注册为 Agent 工具**——避免 Agent 在普通聊天中误调用(曾出现拿图片当音频上传、权限不足后反复重试的死循环)。
+
+复刻能力保留在 **`/mmx voice clone|list|use|delete` 直接指令**(管理员可用),功能不受影响。
+
+### 3. Skills 收敛(减少工具选择干扰)
+
+AstrBot 的 `data/skills/` 下激活过多 skill 会向 system prompt 注入大量工具描述,导致 Agent 选错工具(例如:搜索请求被绕道去查插件索引)。推荐**只保留 `multimedia-tools`**,停用其余:
+
+```
+data/skills/
+├── multimedia-tools    ✅ 保留(联网搜索/画图/看图/语音/视频/音乐路由)
+├── cross-chat-access   ❌ 停用
+├── memory-and-state    ❌ 停用
+├── server-operations   ❌ 停用(其 plugin_index/server_exec 易诱导 Agent 绕路)
+└── social-actions      ❌ 停用
+```
+
+### 4. 画图请走 omnidraw(万象画卷)
+
+`astrbot_plugin_omnidraw` 的 `generate_image` / `generate_selfie` **自带图片下发**,调用后会把图直接发给用户;
+而 `mmx_generate_image` 只返回 CDN 链接,Agent 需额外转发,容易出现"生成了但用户收不到图"。
+
+推荐:`multimedia-tools` skill 里把画图路由指向 omnidraw,并停用 `mmx_generate_image` 这个 LLM 工具。
+
+### 5. 人设里声明工具协作规则
+
+若机器人使用傲娇/高冷等人设(如"芙宁娜"),需在人设 system prompt 中显式声明:
+
+> 用户请你搜索/查资料/画图时是在请你帮忙,不是把你当工具人。可以保持语气傲娇,但**必须先真实调用对应工具**,不能编造答案或回"自己去查"。
+
+否则模型可能出于人设"拒绝被使唤"而不调用工具(曾出现:被要求搜索时回"自己去官网查")。
+
+### 6. 常见故障排查
+
+详见 [OPS_NOTES.md](./OPS_NOTES.md)(含:语音崩溃、搜索不生效、图片不发、工具死循环等真实案例与定位方法)。
+
 ## License
 
 MIT
