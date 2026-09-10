@@ -2,10 +2,10 @@ name: astrbot_plugin_mmx_speech
 display_name: MiniMax 语音播报
 desc: 用 MiniMax T2A 让机器人用指定音色说话——LLM 回复按概率转语音、/speak 朗读引用消息、音色快速复刻与管理。基于复刻音色 FurinaVoice01 等。
 short_desc: MiniMax 语音播报与音色管理
-version: v1.0.0
+version: v1.1.0
 author: yvdi-abc
 repo: https://github.com/yvdi-abc/astrbot_plugin_mmx_speech.git
-astrbot_version: >=4.16,<5
+astrbot_version: ">=4.16,<5"
 tags:
   - voice
   - tts

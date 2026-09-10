@@ -45,7 +45,7 @@
 /voice list                               → 查看已复刻音色
 /voice use 我的声音                       → 切换全局默认
 /voice delete 我的声音                    → 删除
-/voice preview 今天天气不错               → 试听
+/voice preview 今天天气不错  → 试听
 ```
 
 ## 与 chat_enhancer

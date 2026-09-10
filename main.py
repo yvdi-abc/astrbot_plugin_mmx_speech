@@ -53,7 +53,11 @@ class Main(star.Star):
         timeout = float(config.get("timeout", 120) or 120)
         self._default_model = str(config.get("default_model", "speech-2.8-hd") or "speech-2.8-hd")
         self._default_voice_id = str(config.get("default_voice_id", "FurinaVoice01") or "").strip()
-        self._probability = float(config.get("voice_probability", 0.3) or 0.0)
+        try:
+            self._probability = float(config.get("voice_probability", 0.3) or 0.0)
+        except (TypeError, ValueError):
+            self._probability = 0.0
+        self._probability = max(0.0, min(1.0, self._probability))
         self._auto_mode = str(config.get("auto_speak_mode", "dual") or "dual").strip().lower()
         if self._auto_mode not in {"dual", "voice_only", "off"}:
             self._auto_mode = "dual"
@@ -237,7 +241,9 @@ class Main(star.Star):
 
     # ------------------------------------------------------------ 语音发送
 
-    async def _send_voice_segment(self, event: AstrMessageEvent, segment: str) -> None:
+    async def _send_voice_segment(
+        self, event: AstrMessageEvent, segment: str
+    ) -> None:
         """合成并发送一段语音;失败时按配置回退文字。"""
         voice_id = self._resolve_voice_id()
         audio_path, err = await self._speaker.speak_text(
@@ -281,12 +287,53 @@ class Main(star.Star):
 
     # ------------------------------------------------------------ LLM 钩子
 
+    @filter.on_llm_response()
+    async def on_llm_response(self, event: AstrMessageEvent, resp) -> None:
+        """dual 模式:文字照常发,按概率延迟叠一条语音。"""
+        original = getattr(resp, "completion_text", None)
+
+        if self._auto_mode != "dual":
+            return
+        if self._probability <= 0 or not self._is_qq(event) or not self._session_allowed(event):
+            return
+        if not original or not str(original).strip():
+            return
+        if random.random() >= self._probability:
+            return
+        text = self._clean_llm_text(str(original))
+        if not text:
+            return
+        if not self._use_voice_short and len(text) < self._min_voice_len:
+            return
+        if getattr(event, "_mmx_dual_scheduled", False):
+            return
+        event._mmx_dual_scheduled = True
+        chunks = self._chunk_text(text)
+        if not chunks:
+            return
+
+        async def delayed_voice() -> None:
+            try:
+                await asyncio.sleep(self._dual_delay)
+                for i, chunk in enumerate(chunks):
+                    await self._send_voice_segment(event, chunk)
+                    if i < len(chunks) - 1:
+                        await asyncio.sleep(0.6)
+            except Exception as e:  # noqa: BLE001
+                _log_warn(f"dual 语音发送失败: {e}")
+
+        task = asyncio.create_task(delayed_voice())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     @filter.on_decorating_result()
     async def on_decorating_result(self, event: AstrMessageEvent) -> None:
-        """模型A:自动语音接管 LLM 回复发送。
+        """voice_only 模式:自动语音接管 LLM 回复发送(命中段纯语音,未命中段文字)。
 
-        命中段纯语音,未命中段文字。要求:QQ 平台、会话在生效列表、概率>0。
+        该模式与 chat_enhancer 分段冲突,请用 dual 模式或关闭 chat_enhancer。
         """
+        if self._auto_mode != "voice_only":
+            return
         if self._probability <= 0:
             return
         if not self._is_qq(event):
@@ -297,7 +344,6 @@ class Main(star.Star):
         result = event.get_result()
         if result is None or not result.chain:
             return
-        # 只处理 LLM/模型结果,避免误伤其他插件(图片/视频/文件等)
         is_llm = False
         try:
             is_llm = result.is_llm_result() or result.is_model_result()
@@ -305,30 +351,32 @@ class Main(star.Star):
             is_llm = False
         if not is_llm:
             return
-        if any(isinstance(c, (Comp.Node, Comp.Nodes)) for c in result.chain):
+        # 只接管纯文本 LLM 回复:含任何富媒体/文件/Node/工具产物(图片/视频/语音/文件/合并转发)都跳过,
+        # 保持原文发送,避免语音层破坏 Agent 工具调用与多媒体结果。
+        if any(
+            not isinstance(c, Comp.Plain)
+            for c in result.chain
+        ):
             return
 
-        text = "".join(
-            c.text for c in result.chain if isinstance(c, Comp.Plain)
-        ).strip()
+        text = self._clean_llm_text(
+            "".join(c.text for c in result.chain if isinstance(c, Comp.Plain))
+        )
         if not text:
             return
-        # 清理 markdown/控制标签后分段
-        text = re.sub(r"```[\s\S]*?```", "", text)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = re.sub(r"#{1,6}\s+", "", text)
-        text = re.sub(r"\*+|_+|`+", "", text)
-        text = text.strip()
-        if not text:
-            return
-        # 避免自身 send 的消息(Record)进入 LLM 结果判定
-        event._mmx_speech_takeover = True
         segments = self._split_text(text)
         if not segments:
             return
-        # 清空原始发送,由我们接管
         result.chain = []
         await self._schedule_segments(event, segments)
+
+    def _clean_llm_text(self, text: str) -> str:
+        """清理 LLM 文本:去代码块/MD 标记/控制标签,供语音合成。"""
+        text = re.sub(r"```[\s\S]*?```", "", text or "")
+        text = re.sub(r"<[^>]+>", "", text)
+        text = re.sub(r"#{1,6}\s+", "", text)
+        text = re.sub(r"\*+|_+|`+", "", text)
+        return text.strip()
 
     # ------------------------------------------------------------ /speak
 
@@ -475,7 +523,9 @@ class Main(star.Star):
             yield event.plain_result("用法: /voice preview <文本>,用当前默认音色朗读")
             return
         voice_id = self._resolve_voice_id()
-        audio_path, err = await self._speaker.speak_text(t, voice_id, model=self._default_model)
+        audio_path, err = await self._speaker.speak_text(
+            t, voice_id, model=self._default_model
+        )
         if not audio_path:
             yield event.plain_result(f"语音合成失败: {err}")
             return
